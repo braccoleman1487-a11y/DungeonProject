@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.UIElements;
 
 namespace GDD3400.Labyrinth
 {
@@ -28,7 +29,26 @@ namespace GDD3400.Labyrinth
         [Tooltip("The minimum distance to the destination before we start using the pathfinder")]
         [SerializeField] private float _MinimumPathDistance = 6f;
 
-       
+     
+        public enum EnemyStateM
+        {
+            passive,
+            suspicious,
+            hostile
+        }
+
+        //how long to stay suspicous for in seconds
+        public float suspicionTime = 20f;
+        [SerializeField] private float _visionRange = 20f;
+        [SerializeField] private float _visionAngle = 60f; // Field of view angle
+        private float _suspicionTimer;
+        private Transform _player;
+
+        public LayerMask targetLayer;
+
+        bool canSeePlayer;
+
+        Vector3 lastKnownLocation = Vector3.zero;
 
         private Vector3 _velocity;
         private Vector3 _floatingTarget;
@@ -49,6 +69,7 @@ namespace GDD3400.Labyrinth
 
             // Grab and store the wall layer
             _wallLayer = LayerMask.GetMask("Walls");
+            _player = GameObject.FindGameObjectWithTag("Player").transform;
         }
 
         public void Start()
@@ -63,14 +84,61 @@ namespace GDD3400.Labyrinth
         public void Update()
         {
             if (!_isActive) return;
-
+            
             Perception();
             DecisionMaking();
         }
 
         private void Perception()
         {
-            // TODO: Implement perception            
+            // Always ensure we have a player reference
+            if (_player == null)
+            {
+                _player = GameObject.FindGameObjectWithTag("Player")?.transform;
+                if (_player == null)
+                {
+                    Debug.LogWarning("EnemyAgent: No GameObject with tag 'Player' found.");
+                    return;
+                }
+            }
+
+            float eyeHeight = 0.5f;
+            Vector3 origin = transform.position + Vector3.up * eyeHeight;
+            Vector3 playerHead = _player.position + Vector3.up * eyeHeight;
+            Vector3 dirToPlayer = (playerHead - origin);
+            float distanceToPlayer = dirToPlayer.magnitude;
+            Vector3 dirNormalized = dirToPlayer.normalized;
+
+            // Always draw a ray so you can see it in Scene view
+            Debug.DrawRay(origin, dirNormalized * Mathf.Min(distanceToPlayer, _visionRange), Color.cyan);
+
+            // Reset visibility
+            canSeePlayer = false;
+
+            // Only check if player is close enough
+            if (distanceToPlayer <= _visionRange)
+            {
+                float angleToPlayer = Vector3.Angle(transform.forward, dirNormalized);
+                if (angleToPlayer <= _visionAngle * 0.5f)
+                {
+                    // Cast ray including player + walls
+                    int viewMask = LayerMask.GetMask("Default", "Player", "Walls");
+                    if(Physics.Raycast(origin, dirNormalized, out RaycastHit hit, targetLayer, 10))
+                    {
+                        Debug.Log("Hit object: " + hit.collider.name);
+                        if (hit.collider.CompareTag("Player"))
+                        {
+                            canSeePlayer = true;
+                            Debug.DrawRay(origin, dirNormalized * hit.distance, Color.green);
+                        }
+                        else
+                        {
+                            canSeePlayer = false;
+                            Debug.DrawRay(origin, dirNormalized * hit.distance, Color.red);
+                        }
+                    }
+                }
+            }
         }
 
         private void DecisionMaking()

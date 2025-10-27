@@ -55,9 +55,56 @@ namespace  GDD3400.Labyrinth
          
         }
 
+        void PathFollowing()
+        {
+            int closestNodeIndex = GetClosestNode();
+            if (closestNodeIndex != -1)
+            {
+                int nextNodeIndex = closestNodeIndex + 1;
+
+                PathNode targetNode = null;
+
+                if (nextNodeIndex < _path.Count)
+                {
+                    targetNode = _path[nextNodeIndex];
+                }
+
+                else
+                {
+                    targetNode = _path[closestNodeIndex];
+                }
+
+                _floatingTarget = targetNode.transform.position;
+            }
+           
+        }
+
+
+
+
+        // Get the closest node to the player's current position
+        private int GetClosestNode()
+        {
+            int closestNodeIndex = 0;
+            float closestDistance = float.MaxValue;
+            if (_path != null)
+            {
+                for (int i = 0; i < _path.Count; i++)
+                {
+                    float distance = Vector3.Distance(transform.position, _path[i].transform.position);
+                    if (distance < closestDistance)
+                    {
+                        closestDistance = distance;
+                        closestNodeIndex = i;
+                    }
+                }
+                return closestNodeIndex;
+            }
+            return -1;
+        }
         private void Update()
         {
-           
+            PathFollowing();
         }
         private void Start()
         {
@@ -87,7 +134,7 @@ namespace  GDD3400.Labyrinth
 
         public void SetDestinationTarget(Vector3 targetLocation)
         {
-            _targetLocation = targetLocation;
+            _floatingTarget = targetLocation;
             if (Vector3.Distance(transform.position, _targetLocation) > minDistance)
             {
                 PathNode startNode = _levManager.GetNode(transform.position);
