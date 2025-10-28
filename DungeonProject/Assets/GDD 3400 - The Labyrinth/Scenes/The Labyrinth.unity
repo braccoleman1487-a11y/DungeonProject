@@ -10639,6 +10639,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: Tile - Medium - Junction Variant
       objectReference: {fileID: 0}
+    - target: {fileID: 1325081151174219514, guid: 65ad860efece24047894a122d0599c6f, type: 3}
+      propertyPath: m_Layer
+      value: 11
+      objectReference: {fileID: 0}
     - target: {fileID: 2640789613047898369, guid: 65ad860efece24047894a122d0599c6f, type: 3}
       propertyPath: m_LocalPosition.x
       value: 0
@@ -10678,6 +10682,10 @@ PrefabInstance:
     - target: {fileID: 2640789613047898369, guid: 65ad860efece24047894a122d0599c6f, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 8886701854859221284, guid: 65ad860efece24047894a122d0599c6f, type: 3}
+      propertyPath: m_Layer
+      value: 11
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -16874,9 +16882,17 @@ PrefabInstance:
       value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 3555295418026724885, guid: 8112c2beccc3b461cb4e8252dcd040fb, type: 3}
+      propertyPath: _visionRange
+      value: 20
+      objectReference: {fileID: 0}
+    - target: {fileID: 3555295418026724885, guid: 8112c2beccc3b461cb4e8252dcd040fb, type: 3}
       propertyPath: _levelManager
       value: 
       objectReference: {fileID: 1086999212}
+    - target: {fileID: 3555295418026724885, guid: 8112c2beccc3b461cb4e8252dcd040fb, type: 3}
+      propertyPath: _SightDistance
+      value: 100
+      objectReference: {fileID: 0}
     - target: {fileID: 3555295418026724885, guid: 8112c2beccc3b461cb4e8252dcd040fb, type: 3}
       propertyPath: _StoppingDistance
       value: 1

@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -10,7 +11,7 @@ namespace GDD3400.Labyrinth
     public class EnemyAgent : MonoBehaviour
     {
         [SerializeField] private LevelManager _levelManager;
-
+        bool isMovingToTarget = false;
         private bool _isActive = true;
         public bool IsActive
         {
@@ -61,6 +62,7 @@ namespace GDD3400.Labyrinth
 
         private bool DEBUG_SHOW_PATH = true;
 
+        EnemyStateM _currentMainState = EnemyStateM.passive;
 
         public void Awake()
         {
@@ -110,78 +112,124 @@ namespace GDD3400.Labyrinth
             Vector3 dirNormalized = dirToPlayer.normalized;
 
             // Always draw a ray so you can see it in Scene view
-            Debug.DrawRay(origin, dirNormalized * Mathf.Min(distanceToPlayer, _visionRange), Color.cyan);
+           Debug.DrawRay(origin, dirNormalized * Mathf.Min(distanceToPlayer, _visionRange), Color.cyan);
 
             // Reset visibility
             canSeePlayer = false;
-
-            // Only check if player is close enough
-            if (distanceToPlayer <= _visionRange)
+            if (Physics.Raycast(origin, dirNormalized, out RaycastHit hit, _visionRange, targetLayer))
             {
-                float angleToPlayer = Vector3.Angle(transform.forward, dirNormalized);
-                if (angleToPlayer <= _visionAngle * 0.5f)
+                Debug.Log(hit.rigidbody.gameObject.tag);
+                if (hit.collider.gameObject.CompareTag("Player"))
                 {
-                    // Cast ray including player + walls
-                    int viewMask = LayerMask.GetMask("Default", "Player", "Walls");
-                    if(Physics.Raycast(origin, dirNormalized, out RaycastHit hit, targetLayer, 10))
-                    {
-                        Debug.Log("Hit object: " + hit.collider.name);
-                        if (hit.collider.CompareTag("Player"))
-                        {
-                            canSeePlayer = true;
-                            Debug.DrawRay(origin, dirNormalized * hit.distance, Color.green);
-                        }
-                        else
-                        {
-                            canSeePlayer = false;
-                            Debug.DrawRay(origin, dirNormalized * hit.distance, Color.red);
-                        }
-                    }
+                    Debug.Log("Hit player");
+                    canSeePlayer = true;
+                    Debug.DrawRay(origin, dirNormalized * hit.distance, Color.green);
+                }
+                else
+                {
+                    canSeePlayer = false;
+                    Debug.DrawRay(origin, dirNormalized * hit.distance, Color.red);
                 }
             }
         }
 
         private void DecisionMaking()
         {
-            
-           
-            if(_path!=null && _path.Count > 0)
+            switch (_currentMainState)
             {
-                if (Vector3.Distance(transform.position, _destinationTarget) < _LeavingPathDistance)
+                case EnemyStateM.passive:
+                    PassiveBehavior();
+                    break;
+                case EnemyStateM.suspicious:
+                    SuspiciousBehavior();
+                    break;
+
+                case EnemyStateM.hostile:
+                    HostileBehavior();
+
+                break;
+            }
+           
+         
+        }
+
+        private void HostileBehavior()
+        {
+            throw new NotImplementedException();
+        }
+
+        private void SuspiciousBehavior()
+        {
+            throw new NotImplementedException();
+        }
+
+        private void PassiveBehavior()
+        {
+            if (!isMovingToTarget)
+            {
+                GameObject randomNode = ChooseRandomNode();
+                if (randomNode != null)
                 {
-                    _path = null;
-                    _floatingTarget = _destinationTarget;
+                    Debug.Log("finding target");
+                    _destinationTarget = randomNode.transform.position;
+
+                    _path = Pathfinder.FindPath(
+                        _levelManager.GetNode(transform.position),
+                        _levelManager.GetNode(randomNode.transform.position)
+                    );
+
+                    if (_path != null && _path.Count > 0)
+                        _floatingTarget = _path[0].transform.position; // initialize movement
+
+                    isMovingToTarget = true;
                 }
-                else
-                {
-                    PathFollowing();
-                }
+            }
+
+            if (_path != null && _path.Count > 0)
+            {
+                PathFollowing();
             }
         }
 
+        private GameObject ChooseRandomNode()
+        {
+            Collider[] hits = Physics.OverlapSphere(transform.position, 100);
+            List<GameObject> nodesInRange = new List<GameObject>();
+            foreach (Collider hit in hits)
+            {
+                if(hit.gameObject.name == "PathNode" ||  hit.gameObject.name =="ExitNode")
+                {
+                    nodesInRange.Add(hit.gameObject);
+                }
+            }
+            if (nodesInRange.Count == 0) return null;
+            Debug.Log("found at least one node in range");
+            return nodesInRange[UnityEngine.Random.Range(0, nodesInRange.Count-1)];
+
+            }
+
         #region Path Following
 
-        // Perform path following
         private void PathFollowing()
         {
             int closestNodeIndex = GetClosestNode();
-            int nextNodeIndex = closestNodeIndex + 1;
+            PathNode targetNode = _path[closestNodeIndex];
 
-            PathNode targetNode = null;
-
-            if(nextNodeIndex<_path.Count)
+            if (Vector3.Distance(transform.position, targetNode.transform.position) < _StoppingDistance)
             {
-                targetNode = _path[nextNodeIndex];
-            }
-
-            else
-            {
-                targetNode = _path[closestNodeIndex];
+                int nextNodeIndex = closestNodeIndex + 1;
+                if (nextNodeIndex < _path.Count)
+                    targetNode = _path[nextNodeIndex];
+                else
+                {
+                    // Reached end of path
+                    _path = null;
+                    isMovingToTarget = false;
+                    return;
+                }
             }
 
             _floatingTarget = targetNode.transform.position;
-
-
         }
 
         // Public method to set the destination target
@@ -239,31 +287,19 @@ namespace GDD3400.Labyrinth
         {
             if (!_isActive) return;
 
-
-            Debug.DrawLine(this.transform.position, _floatingTarget, Color.green);
-
-            // If we have a floating target and we are not close enough to it, move towards it
             if (_floatingTarget != Vector3.zero && Vector3.Distance(transform.position, _floatingTarget) > _StoppingDistance)
             {
-                // Calculate the direction to the target position
                 Vector3 direction = (_floatingTarget - transform.position).normalized;
-
-                // Calculate the movement vector
-                _velocity = direction * _MaxSpeed;                
+                _velocity = direction * _MaxSpeed;
             }
-
-            // If we are close enough to the floating target, slow down
             else
             {
-                _velocity *= .95f;
+                _velocity *= 0.95f;
             }
 
-            // Calculate the desired rotation towards the movement vector
             if (_velocity != Vector3.zero)
             {
                 Quaternion targetRotation = Quaternion.LookRotation(_velocity);
-
-                // Smoothly rotate towards the target rotation based on the turn rate
                 transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, _TurnRate);
             }
 
