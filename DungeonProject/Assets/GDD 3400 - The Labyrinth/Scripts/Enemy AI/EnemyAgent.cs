@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UIElements;
-
+using UnityEngine.SceneManagement;
 namespace GDD3400.Labyrinth
 {
     [RequireComponent(typeof(Rigidbody))]
@@ -23,14 +23,15 @@ namespace GDD3400.Labyrinth
         [SerializeField] private float _SightDistance = 25f;
 
         [SerializeField] private float _StoppingDistance = 1.5f;
-        
+
         [Tooltip("The distance to the destination before we start leaving the path")]
         [SerializeField] private float _LeavingPathDistance = 2f; // This should not be less than 1
 
         [Tooltip("The minimum distance to the destination before we start using the pathfinder")]
         [SerializeField] private float _MinimumPathDistance = 6f;
 
-     
+        bool valuableMissing = false;
+
         public enum EnemyStateM
         {
             passive,
@@ -38,14 +39,26 @@ namespace GDD3400.Labyrinth
             hostile
         }
 
-        //how long to stay suspicous for in seconds
-        public float suspicionTime = 20f;
+        //the speed at which the suspicion is increased
+        public float suspicionTime = 0.8f;
         [SerializeField] private float _visionRange = 20f;
         [SerializeField] private float _visionAngle = 60f; // Field of view angle
-        private float _suspicionTimer;
-        private Transform _player;
 
+
+        private float _suspicionTimer = 0;
+        private Transform _player;
+        Collider[] targets = new Collider[10];
         public LayerMask targetLayer;
+
+        //because why not
+        float susValue = 0;
+
+        //the needed suspision to enter suspicious state 
+        float neededSus = 40;
+
+        //the needed suspicion to enter hostile state. The timer will increase every 10 seconds when it is in suspicious state.
+        float neededHostile = 75;
+
 
         bool canSeePlayer;
 
@@ -61,6 +74,12 @@ namespace GDD3400.Labyrinth
         private LayerMask _wallLayer;
 
         private bool DEBUG_SHOW_PATH = true;
+
+        bool playerInRange = false;
+
+        List<Vector3> valuableLocations = new List<Vector3>();
+
+
 
         EnemyStateM _currentMainState = EnemyStateM.passive;
 
@@ -81,56 +100,55 @@ namespace GDD3400.Labyrinth
 
             // If we still don't have a level manager, throw an error
             if (_levelManager == null) Debug.LogError("Unable To Find Level Manager");
+
+            FindValuableLocInScene();
+        }
+
+        private void FindValuableLocInScene()
+        {
+            List<GameObject> valuables = new List<GameObject>(GameObject.FindGameObjectsWithTag("Collectable"));
+            if (valuables.Count == 0)
+            {
+                Debug.Log("No valuables found. Critical error");
+            }
+            else
+            {
+                foreach (GameObject valuable in valuables)
+                {
+                    //add the location of the valuable to the array
+                    valuableLocations.Add(valuable.transform.position);       
+                }
+
+            }
         }
 
         public void Update()
         {
             if (!_isActive) return;
-            
+
             Perception();
             DecisionMaking();
         }
 
         private void Perception()
         {
-            // Always ensure we have a player reference
-            if (_player == null)
-            {
-                _player = GameObject.FindGameObjectWithTag("Player")?.transform;
-                if (_player == null)
-                {
-                    Debug.LogWarning("EnemyAgent: No GameObject with tag 'Player' found.");
-                    return;
-                }
-            }
-
-            float eyeHeight = 0.5f;
-            Vector3 origin = transform.position + Vector3.up * eyeHeight;
-            Vector3 playerHead = _player.position + Vector3.up * eyeHeight;
-            Vector3 dirToPlayer = (playerHead - origin);
-            float distanceToPlayer = dirToPlayer.magnitude;
-            Vector3 dirNormalized = dirToPlayer.normalized;
-
-            // Always draw a ray so you can see it in Scene view
-           Debug.DrawRay(origin, dirNormalized * Mathf.Min(distanceToPlayer, _visionRange), Color.cyan);
-
-            // Reset visibility
             canSeePlayer = false;
-            if (Physics.Raycast(origin, dirNormalized, out RaycastHit hit, _visionRange, targetLayer))
+            int numTargets = Physics.OverlapSphereNonAlloc(transform.position, 25, targets, LayerMask.GetMask("Player"), QueryTriggerInteraction.Collide);
+           
+            if (numTargets > 0 && targets.Length > 0)
             {
-                Debug.Log(hit.rigidbody.gameObject.tag);
-                if (hit.collider.gameObject.CompareTag("Player"))
+                foreach (Collider target in targets)
                 {
-                    Debug.Log("Hit player");
-                    canSeePlayer = true;
-                    Debug.DrawRay(origin, dirNormalized * hit.distance, Color.green);
-                }
-                else
-                {
-                    canSeePlayer = false;
-                    Debug.DrawRay(origin, dirNormalized * hit.distance, Color.red);
+                    if (target.gameObject.CompareTag("Player"))
+                    {
+                        canSeePlayer = true;
+                        return;
+                    }
                 }
             }
+
+
+
         }
 
         private void DecisionMaking()
@@ -147,48 +165,95 @@ namespace GDD3400.Labyrinth
                 case EnemyStateM.hostile:
                     HostileBehavior();
 
-                break;
+                    break;
             }
-           
-         
+            PathFollowing();
+
+
+        }
+
+        private void OnCollisionEnter(Collision collision)
+        {
+            if(collision.gameObject.tag == "Player")
+            {
+                SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+            }
         }
 
         private void HostileBehavior()
         {
+            //double movement speed and switch to persuing the player. If we lost the player, then go to their last known location. Once the AI reaches the last known loc
+            //it will decrease back to suspicious.
             throw new NotImplementedException();
         }
 
         private void SuspiciousBehavior()
         {
-            throw new NotImplementedException();
+            //if we are far enough from the player and we can still see them, stop a bit away from the player.
+            if (canSeePlayer)
+            {
+                if (Vector3.Distance(transform.position, _player.transform.position) >= _StoppingDistance)
+                {
+                    SetDestinationTarget(_player.transform.position);
+                }
+                else
+                {
+                    if (Vector3.Distance(transform.position, _player.transform.position) < 20)
+                    {
+                        //if the player gets too close to the enemy, go hostile
+                        _currentMainState = EnemyStateM.hostile;
+                        return;
+                    }
+                }
+            }
+            else
+            {
+                //we can't see the player, so we go back to patroling. The route will take the AI to all the valuables. Regardless if they exist or not.
+                //if the AI gets to the location of the valuable and it is not there,
+                //the AI will permanently enter the hostile phase.
+                if (!isMovingToTarget)
+                {
+                    if (valuableMissing)
+                    {
+                        _currentMainState = EnemyStateM.hostile;
+                    }
+                    else
+                    {
+                        Vector3 randomValuableLocation = valuableLocations[UnityEngine.Random.Range(0, valuableLocations.Count - 1)];
+                        SetDestinationTarget(randomValuableLocation);
+                        isMovingToTarget = true;
+                    }
+
+                }
+
+
+            }
+
+
         }
 
         private void PassiveBehavior()
         {
-            if (!isMovingToTarget)
+            if (canSeePlayer)
             {
-                GameObject randomNode = ChooseRandomNode();
-                if (randomNode != null)
+                // Increase suspicion over time
+                susValue += Time.deltaTime *suspicionTime;
+                Debug.Log(susValue.ToString());
+                if (susValue >= neededSus)
                 {
-                    Debug.Log("finding target");
-                    _destinationTarget = randomNode.transform.position;
-
-                    _path = Pathfinder.FindPath(
-                        _levelManager.GetNode(transform.position),
-                        _levelManager.GetNode(randomNode.transform.position)
-                    );
-
-                    if (_path != null && _path.Count > 0)
-                        _floatingTarget = _path[0].transform.position; // initialize movement
-
-                    isMovingToTarget = true;
+                    Debug.Log("Enemy has become suspicious of the player");
+                    _currentMainState = EnemyStateM.suspicious;
+                    susValue = neededSus;
+                    return;
                 }
             }
-
-            if (_path != null && _path.Count > 0)
+            else
             {
-                PathFollowing();
+                //slowly decrease suspicion if player not seen
+                susValue -= Time.deltaTime / (suspicionTime * 2f);
+                susValue = Mathf.Clamp(susValue, 0, neededSus);
             }
+        
         }
 
         private GameObject ChooseRandomNode()
@@ -197,39 +262,59 @@ namespace GDD3400.Labyrinth
             List<GameObject> nodesInRange = new List<GameObject>();
             foreach (Collider hit in hits)
             {
-                if(hit.gameObject.name == "PathNode" ||  hit.gameObject.name =="ExitNode")
+                if (hit.gameObject.name == "PathNode" || hit.gameObject.name == "ExitNode")
                 {
                     nodesInRange.Add(hit.gameObject);
                 }
             }
             if (nodesInRange.Count == 0) return null;
             Debug.Log("found at least one node in range");
-            return nodesInRange[UnityEngine.Random.Range(0, nodesInRange.Count-1)];
+            return nodesInRange[UnityEngine.Random.Range(0, nodesInRange.Count - 1)];
 
-            }
+        }
 
         #region Path Following
 
         private void PathFollowing()
         {
-            int closestNodeIndex = GetClosestNode();
-            PathNode targetNode = _path[closestNodeIndex];
 
-            if (Vector3.Distance(transform.position, targetNode.transform.position) < _StoppingDistance)
+            if (_path != null)
             {
-                int nextNodeIndex = closestNodeIndex + 1;
-                if (nextNodeIndex < _path.Count)
-                    targetNode = _path[nextNodeIndex];
-                else
-                {
-                    // Reached end of path
-                    _path = null;
-                    isMovingToTarget = false;
-                    return;
-                }
-            }
+                //only follow a path if we have one
+                int closestNodeIndex = GetClosestNode();
+                PathNode targetNode = _path[closestNodeIndex];
 
-            _floatingTarget = targetNode.transform.position;
+                if (Vector3.Distance(transform.position, targetNode.transform.position) < _StoppingDistance)
+                {
+                    int nextNodeIndex = closestNodeIndex + 1;
+                    if (nextNodeIndex < _path.Count)
+                        targetNode = _path[nextNodeIndex];
+                    else
+                    {
+                        // Reached end of path
+                        _path = null;
+                        isMovingToTarget = false;
+                        //Check if near enough to a valuable and see if it is missing
+                        DiscoverMissingValuables();
+                        return;
+                    }
+                }
+
+                _floatingTarget = targetNode.transform.position;
+            }
+            
+        }
+
+        private void DiscoverMissingValuables()
+        {
+            GameObject firstFoundValuable = CheckIfValuablesInRange();
+
+
+        }
+
+        GameObject CheckIfValuablesInRange()
+        {
+            return null;
         }
 
         // Public method to set the destination target
@@ -239,7 +324,7 @@ namespace GDD3400.Labyrinth
            _destinationTarget = destination;
 
             //if the straight line distance is greater than the minumum , lets do pathfinding
-            if (Vector3.Distance(transform.position, destination) > _MinimumPathDistance)
+            if (Vector3.Distance(transform.position, _destinationTarget) > _MinimumPathDistance)
             {
                 PathNode startNode = _levelManager.GetNode(transform.position);
                 PathNode endNode = _levelManager.GetNode(destination);
@@ -267,17 +352,21 @@ namespace GDD3400.Labyrinth
         {
             int closestNodeIndex = 0;
             float closestDistance = float.MaxValue;
-
-            for (int i = 0; i < _path.Count; i++)
+            if(_path!= null)
             {
-                float distance = Vector3.Distance(transform.position, _path[i].transform.position);
-                if (distance < closestDistance)
+                for (int i = 0; i < _path.Count; i++)
                 {
-                    closestDistance = distance;
-                    closestNodeIndex = i;
+                    float distance = Vector3.Distance(transform.position, _path[i].transform.position);
+                    if (distance < closestDistance)
+                    {
+                        closestDistance = distance;
+                        closestNodeIndex = i;
+                    }
                 }
+                return closestNodeIndex;
             }
-            return closestNodeIndex;
+            return -1;
+           
         }
 
         #endregion

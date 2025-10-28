@@ -135,7 +135,7 @@ namespace  GDD3400.Labyrinth
         public void SetDestinationTarget(Vector3 targetLocation)
         {
             _floatingTarget = targetLocation;
-            if (Vector3.Distance(transform.position, _targetLocation) > minDistance)
+            if (Vector3.Distance(transform.position, targetLocation) > minDistance)
             {
                 PathNode startNode = _levManager.GetNode(transform.position);
                 PathNode endNode = _levManager.GetNode(targetLocation);
