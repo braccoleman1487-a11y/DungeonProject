@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UIElements;
+
 using UnityEngine.SceneManagement;
 namespace GDD3400.Labyrinth
 {
@@ -19,10 +20,10 @@ namespace GDD3400.Labyrinth
             set => _isActive = value;
         }
         [SerializeField] private float _TurnRate = 10f;
-        [SerializeField] private float _MaxSpeed = 5f;
+        [SerializeField] private float _MaxSpeed = 0.04f;
         [SerializeField] private float _SightDistance = 25f;
 
-        [SerializeField] private float _StoppingDistance = 1.5f;
+        [SerializeField] private float _StoppingDistance = 0.4f;
 
         [Tooltip("The distance to the destination before we start leaving the path")]
         [SerializeField] private float _LeavingPathDistance = 2f; // This should not be less than 1
@@ -44,7 +45,7 @@ namespace GDD3400.Labyrinth
         [SerializeField] private float _visionRange = 20f;
         [SerializeField] private float _visionAngle = 60f; // Field of view angle
 
-
+        float smoothSpeed = 20f;
         private float _suspicionTimer = 0;
         private Transform _player;
         Collider[] targets = new Collider[10];
@@ -54,14 +55,14 @@ namespace GDD3400.Labyrinth
         float susValue = 0;
 
         //the needed suspision to enter suspicious state 
-        float neededSus = 40;
+        float neededSus = 5;
 
         //the needed suspicion to enter hostile state. The timer will increase every 10 seconds when it is in suspicious state.
-        float neededHostile = 75;
+        float neededHostile = 25;
 
 
         bool canSeePlayer;
-
+        private int _currentNodeIndex;
         Vector3 lastKnownLocation = Vector3.zero;
 
         private Vector3 _velocity;
@@ -75,14 +76,23 @@ namespace GDD3400.Labyrinth
 
         private bool DEBUG_SHOW_PATH = true;
 
+        float _repathCooldown = 0.5f;
+        float _nextRepathTime = 0f;
         bool playerInRange = false;
 
         List<Vector3> valuableLocations = new List<Vector3>();
 
 
-
+        Vector3 targetDirection;
         EnemyStateM _currentMainState = EnemyStateM.passive;
+        bool _pathActive= false;
+        [SerializeField] 
+        private float obstacleAvoidanceRadius;
 
+        [SerializeField]
+        private float _obstacleCheckDistance;
+
+        private RaycastHit[] hits;
         public void Awake()
         {
             // Grab and store the rigidbody component
@@ -91,6 +101,7 @@ namespace GDD3400.Labyrinth
             // Grab and store the wall layer
             _wallLayer = LayerMask.GetMask("Walls");
             _player = GameObject.FindGameObjectWithTag("Player").transform;
+            hits = new RaycastHit[10];
         }
 
         public void Start()
@@ -102,9 +113,63 @@ namespace GDD3400.Labyrinth
             if (_levelManager == null) Debug.LogError("Unable To Find Level Manager");
 
             FindValuableLocInScene();
+            StartCoroutine(FovRoutine());
         }
 
-        private void FindValuableLocInScene()
+        public void Update()
+        {
+            if (!_isActive) return;
+            HandleCollision();
+            DecisionMaking();
+
+
+        }
+
+        private IEnumerator FovRoutine()
+        {
+            WaitForSeconds wait = new WaitForSeconds(0.2f);
+            while (true)
+            {
+                yield return wait;
+                FieldOfViewCheck();
+            }
+            }
+
+        private void FieldOfViewCheck()
+        {
+            Collider[] rangeChecks = Physics.OverlapSphere(transform.position, _SightDistance, targetLayer);
+            if (rangeChecks.Length > 0)
+            {
+                Transform target = rangeChecks[0].transform;
+                Vector3 directionToTarget = (target.position - transform.position).normalized;
+                if (Vector3.Angle(transform.forward, directionToTarget) < _visionAngle / 2)
+                {
+                    float distanceToTarget = Vector3.Distance(transform.position, target.position);
+                    if (!Physics.Raycast(transform.position, directionToTarget, distanceToTarget, _wallLayer))
+                    {
+                        Debug.DrawLine(transform.position, _player.transform.position,Color.blue,2f);
+                        canSeePlayer = true;
+                    }
+                    else
+                    {
+                        canSeePlayer = false;
+                    }
+                }
+                else
+                {
+                    canSeePlayer = false;
+                }
+            }
+            else
+            {
+                if (canSeePlayer)
+                {
+                    canSeePlayer = false;
+                }
+
+            }
+        }
+            private void FindValuableLocInScene()
         {
             List<GameObject> valuables = new List<GameObject>(GameObject.FindGameObjectsWithTag("Collectable"));
             if (valuables.Count == 0)
@@ -122,12 +187,11 @@ namespace GDD3400.Labyrinth
             }
         }
 
-        public void Update()
-        {
-            if (!_isActive) return;
+      
 
-            Perception();
-            DecisionMaking();
+        private void HandleCollision()
+        {
+         
         }
 
         private void Perception()
@@ -192,19 +256,15 @@ namespace GDD3400.Labyrinth
             //if we are far enough from the player and we can still see them, stop a bit away from the player.
             if (canSeePlayer)
             {
-                if (Vector3.Distance(transform.position, _player.transform.position) >= _StoppingDistance)
+                lastKnownLocation = _player.transform.position;
+                if (!_pathActive || Time.deltaTime >= _nextRepathTime || Vector3.Distance(_destinationTarget, _player.position) > 2f)
                 {
+                   
                     SetDestinationTarget(_player.transform.position);
+                    _pathActive = true;
+                    _nextRepathTime = Time.deltaTime + _repathCooldown;
                 }
-                else
-                {
-                    if (Vector3.Distance(transform.position, _player.transform.position) < 20)
-                    {
-                        //if the player gets too close to the enemy, go hostile
-                        _currentMainState = EnemyStateM.hostile;
-                        return;
-                    }
-                }
+                
             }
             else
             {
@@ -219,9 +279,19 @@ namespace GDD3400.Labyrinth
                     }
                     else
                     {
-                        Vector3 randomValuableLocation = valuableLocations[UnityEngine.Random.Range(0, valuableLocations.Count - 1)];
-                        SetDestinationTarget(randomValuableLocation);
-                        isMovingToTarget = true;
+                        if (lastKnownLocation != Vector3.zero)
+                        {
+                            SetDestinationTarget(lastKnownLocation);
+                            isMovingToTarget = true;
+                        }
+                        else
+                        {
+                            Vector3 randomPatrol = valuableLocations[UnityEngine.Random.Range(0,valuableLocations.Count-1)];
+                            SetDestinationTarget(randomPatrol);
+                            isMovingToTarget = true;
+                        }
+                        
+                      
                     }
 
                 }
@@ -277,32 +347,35 @@ namespace GDD3400.Labyrinth
 
         private void PathFollowing()
         {
+            if (_path == null || _path.Count == 0) return;
 
-            if (_path != null)
+            // Make sure _currentNodeIndex is valid
+            _currentNodeIndex = Mathf.Clamp(_currentNodeIndex, 0, _path.Count - 1);
+
+            PathNode targetNode = _path[_currentNodeIndex];
+            float distanceToNode = Vector3.Distance(transform.position, targetNode.transform.position);
+
+            // If close enough, move to next node
+            if (distanceToNode < _StoppingDistance)
             {
-                //only follow a path if we have one
-                int closestNodeIndex = GetClosestNode();
-                PathNode targetNode = _path[closestNodeIndex];
+                _currentNodeIndex++;
 
-                if (Vector3.Distance(transform.position, targetNode.transform.position) < _StoppingDistance)
+                if (_currentNodeIndex >= _path.Count)
                 {
-                    int nextNodeIndex = closestNodeIndex + 1;
-                    if (nextNodeIndex < _path.Count)
-                        targetNode = _path[nextNodeIndex];
-                    else
-                    {
-                        // Reached end of path
-                        _path = null;
-                        isMovingToTarget = false;
-                        //Check if near enough to a valuable and see if it is missing
-                        DiscoverMissingValuables();
-                        return;
-                    }
+                    // Done
+                    _path = null;
+                    _pathActive = false;
+                    lastKnownLocation = Vector3.zero;
+                    isMovingToTarget = false;
+                    DiscoverMissingValuables();
+                    return;
                 }
 
-                _floatingTarget = targetNode.transform.position;
+                targetNode = _path[_currentNodeIndex];
             }
-            
+
+            // Keep updating the floating target
+            _floatingTarget = targetNode.transform.position;
         }
 
         private void DiscoverMissingValuables()
@@ -341,7 +414,8 @@ namespace GDD3400.Labyrinth
             // othewise move directly to destination
             else
             {
-                _floatingTarget = destination;
+                _floatingTarget  = destination;
+                
             }
             
 
@@ -376,23 +450,42 @@ namespace GDD3400.Labyrinth
         {
             if (!_isActive) return;
 
+            // If we have a target and are not within stopping range
             if (_floatingTarget != Vector3.zero && Vector3.Distance(transform.position, _floatingTarget) > _StoppingDistance)
             {
-                Vector3 direction = (_floatingTarget - transform.position).normalized;
-                _velocity = direction * _MaxSpeed;
+                // Get direction toward target, ignoring height
+                targetDirection = _floatingTarget - transform.position;
+                targetDirection.y = 0f; // Prevent looking up/down
+                targetDirection.Normalize();
+
+                // Smooth acceleration toward target
+                Vector3 desiredVelocity = targetDirection * _MaxSpeed;
+                desiredVelocity.y = 0f;
+                _velocity = Vector3.Lerp(_velocity, desiredVelocity, Time.fixedDeltaTime * 2.5f);
+
+                // Apply to Rigidbody
+                _rb.linearVelocity = _velocity;
             }
             else
             {
-                _velocity *= 0.95f;
+                // Gradually slow down when no target or within stopping distance
+                _velocity = Vector3.Lerp(_velocity, Vector3.zero, Time.fixedDeltaTime * 3f);
+                _rb.linearVelocity = _velocity;
             }
 
-            if (_velocity != Vector3.zero)
+            // Smooth rotation toward movement direction (only rotate if actually moving)
+            if (_velocity.sqrMagnitude > 0.05f)
             {
-                Quaternion targetRotation = Quaternion.LookRotation(_velocity);
-                transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, _TurnRate);
-            }
+                // Flatten rotation direction to prevent tilting
+                Vector3 flatDirection = _velocity;
+                flatDirection.y = 0f;
 
-            _rb.linearVelocity = _velocity;
+                if (flatDirection.sqrMagnitude > 0.001f)
+                {
+                    Quaternion targetRotation = Quaternion.LookRotation(flatDirection.normalized, Vector3.up);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * smoothSpeed);
+                }
+            }
         }
         #endregion
 

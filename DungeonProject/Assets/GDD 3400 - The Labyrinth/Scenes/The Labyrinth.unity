@@ -16882,6 +16882,10 @@ PrefabInstance:
       value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 3555295418026724885, guid: 8112c2beccc3b461cb4e8252dcd040fb, type: 3}
+      propertyPath: _visionAngle
+      value: 180
+      objectReference: {fileID: 0}
+    - target: {fileID: 3555295418026724885, guid: 8112c2beccc3b461cb4e8252dcd040fb, type: 3}
       propertyPath: _visionRange
       value: 20
       objectReference: {fileID: 0}
