@@ -20,10 +20,18 @@ namespace GDD3400.Labyrinth
             set => _isActive = value;
         }
         [SerializeField] private float _TurnRate = 10f;
-        [SerializeField] private float _MaxSpeed = 0.04f;
+        [SerializeField] private float _MaxSpeed = 2f;
         [SerializeField] private float _SightDistance = 25f;
 
         [SerializeField] private float _StoppingDistance = 0.4f;
+
+        float _currentSpeed = 2f;
+
+        float _MaxHostileSpeed = 5f;
+
+        //change of speed every second
+        float _speedChangeRate = 0.2f;
+
 
         [Tooltip("The distance to the destination before we start leaving the path")]
         [SerializeField] private float _LeavingPathDistance = 2f; // This should not be less than 1
@@ -32,6 +40,23 @@ namespace GDD3400.Labyrinth
         [SerializeField] private float _MinimumPathDistance = 6f;
 
         bool valuableMissing = false;
+
+
+        [SerializeField]
+        List<GameObject> patrolPathObjects;
+
+        int currentPathIndex = 0;
+
+
+        public enum EnemSubState
+        {
+            patrol,
+            valuable,
+            chase,
+            seek,
+
+        }
+
 
         public enum EnemyStateM
         {
@@ -43,7 +68,7 @@ namespace GDD3400.Labyrinth
         //the speed at which the suspicion is increased
         public float suspicionTime = 0.8f;
         [SerializeField] private float _visionRange = 20f;
-        [SerializeField] private float _visionAngle = 60f; // Field of view angle
+        [SerializeField] private float _visionAngle = 120f; // Field of view angle
 
         float smoothSpeed = 20f;
         private float _suspicionTimer = 0;
@@ -60,6 +85,8 @@ namespace GDD3400.Labyrinth
         //the needed suspicion to enter hostile state. The timer will increase every 10 seconds when it is in suspicious state.
         float neededHostile = 25;
 
+        float speedupTime = 1f;
+        float elapsedSpeedupTIme = 0f;
 
         bool canSeePlayer;
         private int _currentNodeIndex;
@@ -82,12 +109,25 @@ namespace GDD3400.Labyrinth
 
         List<Vector3> valuableLocations = new List<Vector3>();
 
+        //has the ai become aware of the player's prescence
+        bool hasSeenPlayer;
+
+        float elapsedSeenTime = 0f;
+
+        //every 30 seconds if the ai has seen the player at all, the ai will go to where it last saw the player. If the last seen location is vector3.zero, the ai will go to where the ai first saw you
+        float searchTimer = 30f;
+
+        //the first location the player is seen at
+        Vector3 firstSeenLocation;
 
         Vector3 targetDirection;
         EnemyStateM _currentMainState = EnemyStateM.passive;
         bool _pathActive= false;
         [SerializeField] 
         private float obstacleAvoidanceRadius;
+
+        EnemSubState _currentSubState = EnemSubState.patrol;
+
 
         [SerializeField]
         private float _obstacleCheckDistance;
@@ -120,6 +160,7 @@ namespace GDD3400.Labyrinth
         {
             if (!_isActive) return;
             HandleCollision();
+            
             DecisionMaking();
 
 
@@ -153,6 +194,7 @@ namespace GDD3400.Labyrinth
                     else
                     {
                         canSeePlayer = false;
+                        
                     }
                 }
                 else
@@ -187,6 +229,13 @@ namespace GDD3400.Labyrinth
             }
         }
 
+        /// <summary>
+        /// calculate the vector to avoid the obstacles
+        /// </summary>
+        void ObstacleAvoidance()
+        {
+
+        }
       
 
         private void HandleCollision()
@@ -246,11 +295,55 @@ namespace GDD3400.Labyrinth
 
         private void HostileBehavior()
         {
-            //double movement speed and switch to persuing the player. If we lost the player, then go to their last known location. Once the AI reaches the last known loc
-            //it will decrease back to suspicious.
-            throw new NotImplementedException();
-        }
+            //the ai will always know where the player is now and if the ai "sees" the player, it will gradually increase in speed. 
+            if (canSeePlayer)
+            {
+                if (_currentSpeed < _MaxHostileSpeed)
+                {
+                    if (elapsedSpeedupTIme < speedupTime)
+                    {
+                        elapsedSpeedupTIme += Time.deltaTime;
+                    }
+                    else
+                    {
+                        _currentSpeed += _speedChangeRate;
+                        elapsedSpeedupTIme = 0;
+                    }
+                }
+            }
+            else
+            {
+                if (_currentSpeed > _MaxSpeed)
+                {
+                    if (elapsedSpeedupTIme < speedupTime)
+                    {
+                        elapsedSpeedupTIme += Time.deltaTime;
+                    }
+                    else
+                    {
+                        _currentSpeed -= _speedChangeRate;
+                    }
+                }
+                else
+                {
+                    _currentSpeed = _MaxSpeed;
+                    elapsedSpeedupTIme = 0;
+                }
+                
+            }
 
+            //follow the player no matter whether or not they can see them or not
+            if (!_pathActive || Time.deltaTime >= _nextRepathTime || Vector3.Distance(_destinationTarget, _player.position) > 2f)
+            {
+                _pathActive = true;
+                _nextRepathTime = Time.deltaTime + _repathCooldown;
+                SetDestinationTarget(_player.transform.position);
+            }
+          
+        }
+        /// <summary>
+        /// unlike passive, the suspicion value will never reset once he enters this state.
+        /// </summary>
         private void SuspiciousBehavior()
         {
             //if we are far enough from the player and we can still see them, stop a bit away from the player.
@@ -264,7 +357,17 @@ namespace GDD3400.Labyrinth
                     _pathActive = true;
                     _nextRepathTime = Time.deltaTime + _repathCooldown;
                 }
-                
+                if (susValue <= neededHostile)
+                {
+                    susValue += Time.deltaTime * suspicionTime;
+                }
+                else
+                {
+                    susValue = neededHostile;
+                    isMovingToTarget = false;
+                    _currentMainState = EnemyStateM.hostile;
+                    return;
+                }
             }
             else
             {
@@ -273,19 +376,24 @@ namespace GDD3400.Labyrinth
                 //the AI will permanently enter the hostile phase.
                 if (!isMovingToTarget)
                 {
+                    DiscoverMissingValuables();
                     if (valuableMissing)
                     {
+                        Debug.Log("enemy became hostile because there was a valuable missing!");
                         _currentMainState = EnemyStateM.hostile;
+                        return;
                     }
                     else
                     {
                         if (lastKnownLocation != Vector3.zero)
                         {
+                            Debug.Log("going to last known location!");
                             SetDestinationTarget(lastKnownLocation);
                             isMovingToTarget = true;
                         }
                         else
                         {
+                            Debug.Log("Going to patrol valuable locations");
                             Vector3 randomPatrol = valuableLocations[UnityEngine.Random.Range(0,valuableLocations.Count-1)];
                             SetDestinationTarget(randomPatrol);
                             isMovingToTarget = true;
@@ -295,6 +403,8 @@ namespace GDD3400.Labyrinth
                     }
 
                 }
+              
+              
 
 
             }
@@ -304,11 +414,51 @@ namespace GDD3400.Labyrinth
 
         private void PassiveBehavior()
         {
+
+            //if we have seen the player at all, then we start a timer
+            if (hasSeenPlayer)
+            {
+                if (elapsedSeenTime < searchTimer)
+                {
+                    Debug.Log(elapsedSeenTime.ToString());
+                    elapsedSeenTime += Time.deltaTime;
+                }
+                else
+                {
+                    //if we have a last known location, then we go to it, otherwise it goes to the first seen location
+                    if (lastKnownLocation != Vector3.zero)
+                    {
+                        SetDestinationTarget(lastKnownLocation);
+                    }
+                    else
+                    {
+                        SetDestinationTarget(firstSeenLocation);
+                    }
+                    isMovingToTarget = true;
+                    elapsedSeenTime = 0;
+                }
+            }else if (hasSeenPlayer && isMovingToTarget)
+            {
+                if (elapsedSeenTime > 0)
+                {
+                    elapsedSeenTime = 0f;
+                }
+            }
+
             if (canSeePlayer)
             {
+                lastKnownLocation = _player.transform.position;
+                if (!hasSeenPlayer)
+                {
+                    //if the player has been seen at all
+                    hasSeenPlayer = true;
+                    Debug.Log("Seen player for the first time"); 
+                    firstSeenLocation = _player.transform.position;
+                   
+                }
                 // Increase suspicion over time
                 susValue += Time.deltaTime *suspicionTime;
-                Debug.Log(susValue.ToString());
+                
                 if (susValue >= neededSus)
                 {
                     Debug.Log("Enemy has become suspicious of the player");
@@ -322,6 +472,21 @@ namespace GDD3400.Labyrinth
                 //slowly decrease suspicion if player not seen
                 susValue -= Time.deltaTime / (suspicionTime * 2f);
                 susValue = Mathf.Clamp(susValue, 0, neededSus);
+
+                if (currentPathIndex < patrolPathObjects.Count)
+                {
+                    if (!isMovingToTarget)
+                    {
+                        SetDestinationTarget(patrolPathObjects[currentPathIndex].transform.position);
+                        currentPathIndex++;
+                        isMovingToTarget= true;
+                    }
+                }
+                else
+                {
+                    currentPathIndex = 0;
+                    isMovingToTarget= false;
+                }
             }
         
         }
@@ -367,7 +532,7 @@ namespace GDD3400.Labyrinth
                     _pathActive = false;
                     lastKnownLocation = Vector3.zero;
                     isMovingToTarget = false;
-                    DiscoverMissingValuables();
+                 
                     return;
                 }
 
@@ -381,12 +546,24 @@ namespace GDD3400.Labyrinth
         private void DiscoverMissingValuables()
         {
             GameObject firstFoundValuable = CheckIfValuablesInRange();
-
+            if (firstFoundValuable == null)
+            {
+                Debug.Log("the valuable is missing!!!!");
+                valuableMissing = true;
+                return;
+            }
 
         }
 
         GameObject CheckIfValuablesInRange()
         {
+            Collider[] valuables = new Collider[10];
+            int valuablesCount = Physics.OverlapSphereNonAlloc(transform.position, _SightDistance, valuables);
+
+            if (valuablesCount > 0)
+            {
+                return valuables[0].gameObject;
+            }
             return null;
         }
 
@@ -403,7 +580,7 @@ namespace GDD3400.Labyrinth
                 PathNode endNode = _levelManager.GetNode(destination);
 
 
-                Debug.Log("pathfinding");
+              
                 //we couln't find a node close enough
                 if (startNode == null || endNode==null) return;
 
@@ -459,7 +636,7 @@ namespace GDD3400.Labyrinth
                 targetDirection.Normalize();
 
                 // Smooth acceleration toward target
-                Vector3 desiredVelocity = targetDirection * _MaxSpeed;
+                Vector3 desiredVelocity = targetDirection * _currentSpeed;
                 desiredVelocity.y = 0f;
                 _velocity = Vector3.Lerp(_velocity, desiredVelocity, Time.fixedDeltaTime * 2.5f);
 
