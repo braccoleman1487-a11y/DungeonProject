@@ -45,146 +45,65 @@ namespace  GDD3400.Labyrinth
 
         float __turnRate = 10f;
 
+        
+        float sensX;
+        float sensY;
+        Transform orientation;
+
+        float xRotation;
+        float yRotation;
    
         private void Awake()
         {
             // Assign member variables
             _rigidbody = GetComponent<Rigidbody>();
 
-            _moveAction = InputSystem.actions.FindAction("Click");
+         
          
         }
 
-        void PathFollowing()
-        {
-            int closestNodeIndex = GetClosestNode();
-            if (closestNodeIndex != -1)
-            {
-                int nextNodeIndex = closestNodeIndex + 1;
-
-                PathNode targetNode = null;
-
-                if (nextNodeIndex < _path.Count)
-                {
-                    targetNode = _path[nextNodeIndex];
-                }
-
-                else
-                {
-                    targetNode = _path[closestNodeIndex];
-                }
-
-                _floatingTarget = targetNode.transform.position;
-            }
-           
-        }
+      
 
 
 
 
-        // Get the closest node to the player's current position
-        private int GetClosestNode()
-        {
-            int closestNodeIndex = 0;
-            float closestDistance = float.MaxValue;
-            if (_path != null)
-            {
-                for (int i = 0; i < _path.Count; i++)
-                {
-                    float distance = Vector3.Distance(transform.position, _path[i].transform.position);
-                    if (distance < closestDistance)
-                    {
-                        closestDistance = distance;
-                        closestNodeIndex = i;
-                    }
-                }
-                return closestNodeIndex;
-            }
-            return -1;
-        }
+      
         private void Update()
         {
-            PathFollowing();
+            float mouseX = Input.GetAxisRaw("Mouse X") * Time.deltaTime *sensX;
+            float mouseY = Input.GetAxisRaw("Mouse Y") * Time.deltaTime * sensY;
+
+            yRotation += mouseX;
+            xRotation += mouseY;
+
+            xRotation = Mathf.Clamp(xRotation, -90, 90);
+
+            transform.rotation = Quaternion.Euler(xRotation, yRotation, 0);
+            transform.rotation = Quaternion.Euler(0, yRotation, 0);
+
         }
         private void Start()
         {
             // If we didn't manually set the level manager, find it
             if (_levManager == null) _levManager = FindAnyObjectByType<LevelManager>();
+            Cursor.lockState = CursorLockMode.Locked;   
         }
 
         private void FixedUpdate()
         {
-            if (_floatingTarget != Vector3.zero && Vector3.Distance(transform.position, _floatingTarget) > _stoppingDistance)
-            {
-                Vector3 direction = (_floatingTarget-transform.position).normalized;
-                _velocity = direction * __MaxSpeed;
-            }
-            else
-            {
-                //othervise slow down
-                _velocity *= 0.95f;
-            }
-            if(_velocity!= Vector3.zero)
-            {
-                Quaternion targetRotation = Quaternion.LookRotation(_velocity);
-                transform.rotation = Quaternion.Lerp(transform.rotation, targetRotation, __turnRate);
-            }
-            _rigidbody.linearVelocity = _velocity;
+           
         }
 
         public void SetDestinationTarget(Vector3 targetLocation)
         {
-            _floatingTarget = targetLocation;
-            if (Vector3.Distance(transform.position, targetLocation) > minDistance)
-            {
-                PathNode startNode = _levManager.GetNode(transform.position);
-                PathNode endNode = _levManager.GetNode(targetLocation);
-                if (startNode == null || endNode == null)
-                {
-                    return;
-                }
-                _path = Pathfinder.FindPath(startNode, endNode);
-                StartCoroutine(DrawPathDebugLines(_path));
-            }
-            else
-            {
-                _floatingTarget = targetLocation;
-            }
+         
         }
 
-        private void PerformDash()
-        {
-            _performDash = true;
-            _isDashing = true;
-
-            // Call reset after the cooldown
-            Invoke("ResetDash", _DashCooldown);
-        }
-
-        private void IsDashing()
-        {
-            // Make invulnurable when dashing
-        }
-
-        private void ResetDash()
-        {
-            _isDashing = false;
-            _rigidbody.linearVelocity = _moveVector * _MoveSpeed;
-        }
+       
+       
+        
 
 
-        /// <summary>
-        /// Draws a visual representation of the path to the screen
-        /// </summary>
-        /// <param name="path"></param>
-        /// <returns></returns>
-        private IEnumerator DrawPathDebugLines(List<PathNode> path)
-        {
-            for (int i = 0; i < path.Count - 1; i++)
-            {
-                Debug.DrawLine(path[i].transform.position, path[i + 1].transform.position, Color.red, 3.5f);
-                yield return new WaitForSeconds(0.1f);
-            }
-        }
+       
     }
 }
