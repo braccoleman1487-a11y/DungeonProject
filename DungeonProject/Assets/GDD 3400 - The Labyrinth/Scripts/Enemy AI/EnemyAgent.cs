@@ -159,7 +159,7 @@ namespace GDD3400.Labyrinth
         public void Update()
         {
             if (!_isActive) return;
-            HandleCollision();
+           
             
             DecisionMaking();
 
@@ -238,9 +238,48 @@ namespace GDD3400.Labyrinth
         }
       
 
-        private void HandleCollision()
+        private Vector3 HandleAvoidance()
         {
-         
+          Vector3 avoidance = Vector3.zero;
+            float rayDistance = _obstacleCheckDistance > 0 ? _obstacleCheckDistance : 2f;
+            float avoidStrength = 1.5f;
+
+            Vector3 forwardDir = transform.forward;
+            Vector3 rightDir = Quaternion.Euler(0,45f,0f) * forwardDir;
+            Vector3 leftDir = Quaternion.Euler(0, -45f, 0f) * forwardDir;
+
+            avoidance += CheckAvoidanceRay(forwardDir, rayDistance, avoidStrength);
+            avoidance += CheckAvoidanceRay(rightDir, rayDistance, avoidStrength);
+            avoidance += CheckAvoidanceRay(leftDir, rayDistance, avoidStrength);
+            if(avoidance.sqrMagnitude > 0.001f)
+            {
+                return avoidance.normalized;
+            }
+            return Vector3.zero;
+        }
+
+
+        Vector3 CheckAvoidanceRay(Vector3 dir, float rayDistance, float strength)
+        {
+            Vector3 result = Vector3.zero;
+            Debug.DrawRay(transform.position, dir.normalized * rayDistance, Color.yellow);
+            if(Physics.Raycast(transform.position,dir.normalized,out RaycastHit hit, rayDistance))
+            {
+                float closeNess = 1f - (hit.distance / rayDistance);
+                float weight = closeNess* strength;
+
+                Vector3 push = hit.normal*weight;
+
+                Vector3 tangent = Vector3.Cross(hit.normal,Vector3.up).normalized;
+
+                if (Vector3.Dot(tangent, transform.forward) < 0f)
+                {
+                    tangent = -tangent;
+                }
+                push += tangent * (weight * 0.3f);
+                result += push;
+            }
+            return result;
         }
 
         private void Perception()
@@ -389,14 +428,14 @@ namespace GDD3400.Labyrinth
                         {
                             Debug.Log("going to last known location!");
                             SetDestinationTarget(lastKnownLocation);
-                            isMovingToTarget = true;
+                            isMovingToTarget = false;
                         }
                         else
                         {
                             Debug.Log("Going to patrol valuable locations");
                             Vector3 randomPatrol = valuableLocations[UnityEngine.Random.Range(0,valuableLocations.Count-1)];
                             SetDestinationTarget(randomPatrol);
-                            isMovingToTarget = true;
+                            isMovingToTarget = false;
                         }
                         
                       
@@ -434,7 +473,7 @@ namespace GDD3400.Labyrinth
                     {
                         SetDestinationTarget(firstSeenLocation);
                     }
-                    isMovingToTarget = true;
+                    isMovingToTarget = false;
                     elapsedSeenTime = 0;
                 }
             }else if (hasSeenPlayer && isMovingToTarget)
@@ -482,10 +521,10 @@ namespace GDD3400.Labyrinth
                         isMovingToTarget= true;
                     }
                 }
-                else
+                else if(!isMovingToTarget)
                 {
                     currentPathIndex = 0;
-                    isMovingToTarget= false;
+                    
                 }
             }
         
@@ -625,31 +664,19 @@ namespace GDD3400.Labyrinth
         #region Action
         private void FixedUpdate()
         {
-            if (!_isActive) return;
+            Vector3 avoidDir = HandleAvoidance();
 
-            // If we have a target and are not within stopping range
-            if (_floatingTarget != Vector3.zero && Vector3.Distance(transform.position, _floatingTarget) > _StoppingDistance)
+            Vector3 pathDir = (transform.position-_destinationTarget).normalized;
+            //flatening the direction in the y so the ai does not sink into the ground
+            Vector3 flatDir = new Vector3(pathDir.x,0,pathDir.z);
+
+            if (avoidDir != Vector3.zero)
             {
-                // Get direction toward target, ignoring height
-                targetDirection = _floatingTarget - transform.position;
-                targetDirection.y = 0f; // Prevent looking up/down
-                targetDirection.Normalize();
-
-                // Smooth acceleration toward target
-                Vector3 desiredVelocity = targetDirection * _currentSpeed;
-                desiredVelocity.y = 0f;
-                _velocity = Vector3.Lerp(_velocity, desiredVelocity, Time.fixedDeltaTime * 2.5f);
-
-                // Apply to Rigidbody
-                _rb.linearVelocity = _velocity;
-            }
-            else
-            {
-                // Gradually slow down when no target or within stopping distance
-                _velocity = Vector3.Lerp(_velocity, Vector3.zero, Time.fixedDeltaTime * 3f);
-                _rb.linearVelocity = _velocity;
+                flatDir = Vector3.Lerp(flatDir, avoidDir, Time.fixedDeltaTime * 3.0f);
             }
 
+            _velocity = flatDir * _currentSpeed;
+            _rb.linearVelocity = _velocity;
             // Smooth rotation toward movement direction (only rotate if actually moving)
             if (_velocity.sqrMagnitude > 0.05f)
             {
